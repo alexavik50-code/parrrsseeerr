@@ -103,4 +103,41 @@ async def parse_booking_strict(url: str, message: types.Message):
     return results
 
 @dp.message(Command("start"))
-async def send_welcome(message
+async def send_welcome(message: types.Message):
+    await message.answer("Привет! Пришли ссылку с Booking.com. Я прочешу ВЕСЬ список (до 1000 отелей) и выдам только те, где есть бесплатная отмена и нет предоплаты.")
+
+@dp.message()
+async def handle_search(message: types.Message):
+    user_input = message.text
+    
+    if user_input.startswith("http"):
+        await message.answer("🔗 Погнали! Сканирую всю доступную выдачу. Это займет несколько минут...")
+        url = user_input
+    else:
+        await message.answer("Скинь ссылку, чтобы я начал работу.")
+        return
+    
+    apartments = await parse_booking_strict(url, message)
+    
+    if apartments == "empty" or not apartments:
+        await message.answer("❌ Я проверил страницы, но нигде не нашел совпадений по всем условиям.")
+    elif isinstance(apartments, str) and apartments.startswith("error:"):
+        await message.answer(f"⚠️ Ошибка сервера: {apartments}")
+    else:
+        await message.answer(f"🎉 Готово! Нашел {len(apartments)} подходящих вариантов. Отправляю...")
+        
+        # Отправляем результаты с задержкой, чтобы Телеграм не забанил бота
+        for apt in apartments:
+            try:
+                await message.answer(apt, parse_mode="HTML")
+                await asyncio.sleep(0.3) 
+            except Exception:
+                pass
+                
+        await message.answer("✅ Весь список успешно отправлен!")
+
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
