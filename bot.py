@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from playwright.async_api import async_playwright
 
-BOT_TOKEN = "8626839715:AAFfkmUyyXan7E6aavkGd4HiU8xAMuo4czw"
+BOT_TOKEN = "8737096321:AAFwCWXI1NHqSspXMZI0OqoxAs60JDf0ihc"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -13,8 +13,16 @@ async def parse_booking_strict(url: str):
     results = []
     
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        # ПРИНУДИТЕЛЬНО СТАВИМ РУССКИЙ ЯЗЫК И ВАЛЮТУ, ЧТОБЫ ТЕКСТ СОВПАДАЛ
+        # ВОТ ЭТИ НАСТРОЙКИ СПАСАЮТ RAILWAY ОТ ЗАВИСАНИЙ
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+            ]
+        )
+        
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={'width': 1920, 'height': 1080},
@@ -24,14 +32,17 @@ async def parse_booking_strict(url: str):
         
         try:
             await page.goto(url, timeout=60000)
-            await page.wait_for_selector('[data-testid="property-card"]', timeout=15000)
+            
+            try:
+                await page.wait_for_selector('[data-testid="property-card"]', timeout=15000)
+            except:
+                return "empty"
             
             cards = await page.query_selector_all('[data-testid="property-card"]')
             
             for card in cards:
                 card_text = await card.inner_text()
                 
-                # Ищем точные фразы
                 if "Предоплата не требуется" not in card_text or "Бесплатная отмена" not in card_text:
                     continue 
                 
@@ -49,7 +60,6 @@ async def parse_booking_strict(url: str):
                     if price_numbers:
                         price_value = int(price_numbers)
                         
-                        # Если Букинг выдаст рубли, поменяй 100 на нужную сумму
                         if price_value >= 100: 
                             full_link = link.split('?')[0]
                             results.append(
@@ -63,7 +73,7 @@ async def parse_booking_strict(url: str):
                     break
                     
         except Exception as e:
-            print(f"Ошибка: {e}")
+            return f"error: {e}"
             
         finally:
             await browser.close()
@@ -78,7 +88,6 @@ async def send_welcome(message: types.Message):
 async def handle_search(message: types.Message):
     user_input = message.text
     
-    # Проверяем, скинул ли пользователь ссылку или просто текст
     if user_input.startswith("http"):
         await message.answer("🔗 Вижу ссылку! Запускаю сканирование этой страницы...")
         url = user_input
@@ -88,11 +97,15 @@ async def handle_search(message: types.Message):
     
     apartments = await parse_booking_strict(url)
     
-    if apartments:
+    if apartments == "empty":
+        await message.answer("❌ Букинг не показал ни одного отеля (возможно, на эти даты всё занято или сайт выдал капчу).")
+    elif isinstance(apartments, str) and apartments.startswith("error:"):
+        await message.answer(f"⚠️ Ошибка при загрузке: {apartments}")
+    elif apartments:
         for apt in apartments:
             await message.answer(apt, parse_mode="HTML")
     else:
-        await message.answer("❌ Не нашел подходящих вариантов на этой странице или Букинг заблокировал доступ.")
+        await message.answer("❌ На этой странице нет вариантов, подходящих под все условия.")
 
 async def main():
     await dp.start_polling(bot)
