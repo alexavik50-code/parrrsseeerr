@@ -26,19 +26,21 @@ async def parse_booking_strict(url: str, message: types.Message):
             viewport={'width': 1920, 'height': 1080},
             locale='ru-RU' 
         )
-        page = await context.new_page()
-        
-        # Турбо-режим: блокируем картинки и стили для скорости
-        async def route_intercept(route):
-            if route.request.resource_type in ["image", "media", "font", "stylesheet"]:
-                await route.abort()
-            else:
-                await route.continue_()
-        await page.route("**/*", route_intercept)
         
         try:
             # ЛИСТАЕМ ВСЕ СТРАНИЦЫ (максимум Букинга - 40 страниц)
             for page_num in range(40):
+                # 💥 ГЕНИАЛЬНЫЙ МАНЕВР: Создаем новую вкладку для каждой страницы
+                page = await context.new_page()
+                
+                # Турбо-режим: блокируем картинки и стили для скорости
+                async def route_intercept(route):
+                    if route.request.resource_type in ["image", "media", "font", "stylesheet"]:
+                        await route.abort()
+                    else:
+                        await route.continue_()
+                await page.route("**/*", route_intercept)
+
                 current_offset = page_num * 25
                 page_url = f"{base_url}&offset={current_offset}"
                 
@@ -51,19 +53,19 @@ async def parse_booking_strict(url: str, message: types.Message):
                 try:
                     await page.wait_for_selector('[data-testid="property-card"]', timeout=15000)
                 except:
-                    # Если карточек нет, значит дошли до конца выдачи
+                    await page.close() # Закрываем вкладку перед выходом
                     break
                 
                 cards = await page.query_selector_all('[data-testid="property-card"]')
                 
                 if not cards:
+                    await page.close() # Закрываем вкладку перед выходом
                     break
                 
                 for card in cards:
                     card_text = await card.inner_text()
                     text_lower = card_text.lower()
                     
-                    # Ищем разные варианты написания Букинга
                     has_cancel = "бесплатная отмена" in text_lower or "отмена бесплатно" in text_lower
                     has_noprepay = "предоплата не" in text_lower or "без предоплаты" in text_lower or "платите на месте" in text_lower
                     
@@ -93,6 +95,9 @@ async def parse_booking_strict(url: str, message: types.Message):
                                     f"✅ Без предоплаты и с бесплатной отменой\n"
                                     f"🔗 <a href='{full_link}'>Смотреть объявление</a>"
                                 )
+                
+                # 💥 ЗАКРЫВАЕМ ВКЛАДКУ В КОНЦЕ ЦИКЛА! Память очищается полностью!
+                await page.close()
                                 
         except Exception as e:
             return f"error: {e}"
