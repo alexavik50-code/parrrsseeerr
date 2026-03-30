@@ -4,22 +4,21 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from playwright.async_api import async_playwright
 
-BOT_TOKEN = "8737096321:AAGaATp37FQY6dA8qOBB2uD1kemGDMfzE5s"
+BOT_TOKEN = "8626839715:AAFfkmUyyXan7E6aavkGd4HiU8xAMuo4czw"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-async def parse_booking_strict(city: str):
-    # Берем самую базовую ссылку только с городом
-    url = f"https://www.booking.com/searchresults.ru.html?ss={city}"
-    
+async def parse_booking_strict(url: str):
     results = []
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
+        # ПРИНУДИТЕЛЬНО СТАВИМ РУССКИЙ ЯЗЫК И ВАЛЮТУ, ЧТОБЫ ТЕКСТ СОВПАДАЛ
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={'width': 1920, 'height': 1080}
+            viewport={'width': 1920, 'height': 1080},
+            locale='ru-RU' 
         )
         page = await context.new_page()
         
@@ -27,18 +26,15 @@ async def parse_booking_strict(city: str):
             await page.goto(url, timeout=60000)
             await page.wait_for_selector('[data-testid="property-card"]', timeout=15000)
             
-            # Собираем все карточки на странице
             cards = await page.query_selector_all('[data-testid="property-card"]')
             
             for card in cards:
-                # Получаем ВЕСЬ текст внутри карточки отеля разом
                 card_text = await card.inner_text()
                 
-                # ЖЕСТКАЯ ПРОВЕРКА: Ищем точные фразы из твоего скриншота
+                # Ищем точные фразы
                 if "Предоплата не требуется" not in card_text or "Бесплатная отмена" not in card_text:
-                    continue # Пропускаем, если нет нужных условий
+                    continue 
                 
-                # Извлекаем элементы, если текстовые условия совпали
                 title_el = await card.query_selector('[data-testid="title"]')
                 link_el = await card.query_selector('[data-testid="title-link"]')
                 price_el = await card.query_selector('[data-testid="price-and-discounted-price"]')
@@ -48,13 +44,12 @@ async def parse_booking_strict(city: str):
                     link = await link_el.get_attribute('href')
                     price_text = await price_el.inner_text()
                     
-                    # Очищаем цену от валюты и пробелов
                     price_numbers = re.sub(r'[^\d]', '', price_text)
                     
                     if price_numbers:
                         price_value = int(price_numbers)
                         
-                        # Проверяем условие: от 100 условных единиц (евро)
+                        # Если Букинг выдаст рубли, поменяй 100 на нужную сумму
                         if price_value >= 100: 
                             full_link = link.split('?')[0]
                             results.append(
@@ -64,12 +59,11 @@ async def parse_booking_strict(city: str):
                                 f"🔗 <a href='{full_link}'>Смотреть объявление</a>"
                             )
                             
-                # Для теста останавливаемся на 5 подходящих вариантах
                 if len(results) >= 5:
                     break
                     
         except Exception as e:
-            print(f"Ошибка парсинга или капча: {e}")
+            print(f"Ошибка: {e}")
             
         finally:
             await browser.close()
@@ -78,20 +72,27 @@ async def parse_booking_strict(city: str):
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
-    await message.answer("Привет! Напиши город, и я соберу базу вариантов строго от 100€, без предоплаты и с бесплатной отменой.")
+    await message.answer("Привет! Пришли мне название города ИЛИ готовую ссылку с Booking.com, и я отфильтрую результаты.")
 
 @dp.message()
-async def handle_city_search(message: types.Message):
-    city = message.text
-    await message.answer(f"⏳ Сканирую все карточки в: {city}...\nИщу совпадения по тексту.")
+async def handle_search(message: types.Message):
+    user_input = message.text
     
-    apartments = await parse_booking_strict(city)
+    # Проверяем, скинул ли пользователь ссылку или просто текст
+    if user_input.startswith("http"):
+        await message.answer("🔗 Вижу ссылку! Запускаю сканирование этой страницы...")
+        url = user_input
+    else:
+        await message.answer(f"⏳ Формирую поиск по городу: {user_input}...")
+        url = f"https://www.booking.com/searchresults.ru.html?ss={user_input}"
+    
+    apartments = await parse_booking_strict(url)
     
     if apartments:
         for apt in apartments:
             await message.answer(apt, parse_mode="HTML")
     else:
-        await message.answer("Не нашел подходящих вариантов на первой странице или Букинг выдал капчу.")
+        await message.answer("❌ Не нашел подходящих вариантов на этой странице или Букинг заблокировал доступ.")
 
 async def main():
     await dp.start_polling(bot)
