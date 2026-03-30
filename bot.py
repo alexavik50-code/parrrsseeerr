@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from playwright.async_api import async_playwright
 
-BOT_TOKEN = "ТВОЙ_ТОКЕН_ТЕЛЕГРАМ"
+BOT_TOKEN = "8737096321:AAGaATp37FQY6dA8qOBB2uD1kemGDMfzE5s"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
